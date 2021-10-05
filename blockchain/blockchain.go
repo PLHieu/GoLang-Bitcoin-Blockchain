@@ -14,6 +14,11 @@ type BlockChain struct {
 	Database *badger.DB
 }
 
+type BlockChainIterator struct {
+	CurrentHash []byte
+	Database *badger.DB
+}
+
 func InitBlockChain() *BlockChain {
 	db, err := badger.Open(badger.DefaultOptions(dbPath))
 	handle(err)
@@ -83,4 +88,36 @@ func handle(err error) {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func (chain *BlockChain) Iterator() *BlockChainIterator {
+	iter := &BlockChainIterator{chain.LastHash, chain.Database}
+
+	return iter
+}
+
+func (iter *BlockChainIterator) Next() *Block{
+	var block *Block
+
+	// get Value from hash key
+	err := iter.Database.View(func(txn *badger.Txn) error {
+		item, err := txn.Get(iter.CurrentHash)
+		if err != nil {
+			block = nil
+		}else {
+			err = item.Value(func(encodedBlock []byte) error {
+				block = Deserialize(encodedBlock)
+				return nil
+			})
+			handle(err)
+		}
+
+		return err
+	})
+	handle(err)
+
+	// Move current to next
+	iter.CurrentHash = block.PrevHash
+
+	return block
 }
