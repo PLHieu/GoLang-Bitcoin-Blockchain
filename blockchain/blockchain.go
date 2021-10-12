@@ -1,8 +1,9 @@
 package blockchain
 
 import (
+	"encoding/hex"
 	"github.com/dgraph-io/badger"
-	"log"
+	"myblockchain/utils"
 )
 
 const (
@@ -16,18 +17,19 @@ type BlockChain struct {
 
 type BlockChainIterator struct {
 	CurrentHash []byte
-	Database *badger.DB
+	Database    *badger.DB
 }
 
-func InitBlockChain() *BlockChain {
+func InitBlockChain(firstAddress string) *BlockChain {
 	db, err := badger.Open(badger.DefaultOptions(dbPath))
-	handle(err)
+	utils.Handle(err)
 
 	// Create new Blockchain
 	newBlockChain := &BlockChain{[]byte{}, db}
 
 	// Create Genesis Block
-	newBlock := CreateGenesis()
+	genesisCoinbaseTx := CoinbaseTx(firstAddress, "First Transaction from Genesis")
+	newBlock := CreateGenesis(genesisCoinbaseTx)
 
 	// Insert block into Badge DB & Update LastHash
 	err = newBlockChain.Database.Update(func(txn *badger.Txn) error {
@@ -38,7 +40,7 @@ func InitBlockChain() *BlockChain {
 			err := txn.Set(newBlock.Hash, newBlock.Serialize())
 			err = txn.Set([]byte("lasthash"), newBlock.Hash)
 
-			newBlockChain.LastHash = newBlock.Data
+			newBlockChain.LastHash = newBlock.Hash
 
 			return err
 		} else { // if it already existed
@@ -46,17 +48,17 @@ func InitBlockChain() *BlockChain {
 				newBlockChain.LastHash = val
 				return nil
 			})
-			handle(err)
+			utils.Handle(err)
 		}
 
 		return err
 	})
-	handle(err)
+	utils.Handle(err)
 
 	return newBlockChain
 }
 
-func (chain *BlockChain) AddBlock(data string) {
+func (chain *BlockChain) AddBlock(txs []*Transaction) {
 	// tao block tu data + lastHash trong Badger DB
 	var lastHash []byte
 	err := chain.Database.View(func(txn *badger.Txn) error {
@@ -69,25 +71,19 @@ func (chain *BlockChain) AddBlock(data string) {
 
 		return err
 	})
-	handle(err)
-	newBlock := CreateBlock(data, lastHash)
+	utils.Handle(err)
+	newBlock := CreateBlock(txs, lastHash)
 
 	// them block vao trong Badger DB &  Update lastHash cua Badger DB & blockchain
 	err = chain.Database.Update(func(txn *badger.Txn) error {
 		err := txn.Set(newBlock.Hash, newBlock.Serialize())
 		err = txn.Set([]byte("lasthash"), newBlock.Hash)
 
-		chain.LastHash = newBlock.Data
+		chain.LastHash = newBlock.Hash
 
 		return err
 	})
-	handle(err)
-}
-
-func handle(err error) {
-	if err != nil {
-		log.Fatal(err)
-	}
+	utils.Handle(err)
 }
 
 func (chain *BlockChain) Iterator() *BlockChainIterator {
@@ -96,7 +92,7 @@ func (chain *BlockChain) Iterator() *BlockChainIterator {
 	return iter
 }
 
-func (iter *BlockChainIterator) Next() *Block{
+func (iter *BlockChainIterator) Next() *Block {
 	var block *Block
 
 	// get Value from hash key
@@ -104,20 +100,110 @@ func (iter *BlockChainIterator) Next() *Block{
 		item, err := txn.Get(iter.CurrentHash)
 		if err != nil {
 			block = nil
-		}else {
+		} else {
 			err = item.Value(func(encodedBlock []byte) error {
 				block = Deserialize(encodedBlock)
 				return nil
 			})
-			handle(err)
+			utils.Handle(err)
 		}
 
 		return err
 	})
-	handle(err)
+	utils.Handle(err)
 
 	// Move current to next
 	iter.CurrentHash = block.PrevHash
 
 	return block
+}
+
+// FindUnspentTxOutputs
+// Find all address's transaction that have unspent outputs
+// Input: address that want to transfer coin
+// Output: list of transactions
+///*
+func (chain *BlockChain) FindUnspentTxOutputs(address string) []Transaction {
+	var unspentTxs []Transaction
+
+	// list of outputs that were spent, map: transactionID -> index of spent Output
+	spentTXOs := make(map[string][]int)
+
+	iter := chain.Iterator()
+	for {
+		block := iter.Next()
+		if block == nil {
+			break
+		}
+
+		// Iterate each transaction in a block
+		for _, tx := range block.Transactions {
+			// Get string version of transaction's ID
+			strTxId := hex.EncodeToString(tx.ID)
+
+		Outputs:
+			// iterate each of outputs of transaction
+			for outIdx, output := range tx.Outputs {
+				// If output ot this transaction has spent -> continue
+				if spentTXOs[strTxId] != nil {
+					for _, spentOut := range spentTXOs[strTxId] {
+						if spentOut == outIdx {
+							continue Outputs
+						}
+					}
+				}
+
+				// If output of this transaction is not spent and is this address
+				if output.Address == address {
+					unspentTxs = append(unspentTxs, *tx)
+				}
+			}
+
+			// if this transaction is not coinbase transaction
+			if !tx.IsCoinBase() {
+				for _, input := range tx.Inputs {
+					// Todo: something with signature
+					if input.Sig == address {
+						// Add spent output into spentTXOs
+						spentTXOs[strTxId] = append(spentTXOs[strTxId], input.OutIndex)
+					}
+				}
+			}
+		}
+	}
+
+	return unspentTxs
+}
+
+// FindSpendableOutputs
+// Input: address that want to transfer coin, amount of coin
+// Output: Sum of spendable outputs
+// Output: Map: transactionID -> array of Output's index in that transaction
+///*
+func (chain *BlockChain) FindSpendableOutputs(address string, amount int) (int, map[string][]int) {
+	unspentOuts := make(map[string][]int)
+	accumulated := 0
+
+	// Get all address's transaction that have unspent outputs
+	unspentTxs := chain.FindUnspentTxOutputs(address)
+
+	for _, tx := range unspentTxs {
+		// Get string version of transaction's ID
+		txID := hex.EncodeToString(tx.ID)
+
+		// Iterate each of outputs in that transaction
+		for outIdx, output := range tx.Outputs {
+			// If that Output belong to address and acc still < amount
+			if output.Address == address {
+				unspentOuts[txID] = append(unspentOuts[txID], outIdx)
+				accumulated += output.Value
+			}
+
+			if accumulated > amount {
+				return accumulated, unspentOuts
+			}
+		}
+	}
+
+	return accumulated, unspentOuts
 }

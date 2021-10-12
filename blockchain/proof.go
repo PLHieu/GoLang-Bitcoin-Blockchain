@@ -50,7 +50,7 @@ func toHex(num int64) []byte {
 
 func (pow *ProofOfWork) combineDataForPow(nonce int) []byte {
 	data := bytes.Join([][]byte{
-		pow.Block.Data,
+		pow.Block.HashTransactions(),
 		pow.Block.PrevHash,
 		toHex(int64(nonce)),
 		toHex(int64(Difficulty)),
