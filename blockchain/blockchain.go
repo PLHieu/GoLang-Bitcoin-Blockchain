@@ -2,12 +2,16 @@ package blockchain
 
 import (
 	"encoding/hex"
+	"fmt"
 	"github.com/dgraph-io/badger"
 	"myblockchain/utils"
+	"os"
+	"runtime"
 )
 
 const (
 	dbPath = "./tmp/blocks"
+	dbFile      = "./tmp/blocks/MANIFEST"
 )
 
 type BlockChain struct {
@@ -20,7 +24,50 @@ type BlockChainIterator struct {
 	Database    *badger.DB
 }
 
+func DBexists() bool {
+	if _, err := os.Stat(dbFile); os.IsNotExist(err) {
+		return false
+	}
+
+	return true
+}
+
+func LoadBlockChain() *BlockChain {
+	if DBexists() == false {
+		fmt.Println("No existing blockchain found, create one!")
+		runtime.Goexit()
+	}
+
+	var lastHash []byte
+
+	db, err := badger.Open(badger.DefaultOptions(dbPath))
+	utils.Handle(err)
+
+	err = db.Update(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte("lasthash"))
+		utils.Handle(err)
+
+		err = item.Value(func(val []byte) error {
+			lastHash = val
+			return nil
+		})
+		utils.Handle(err)
+
+		return err
+	})
+	utils.Handle(err)
+
+	chain := BlockChain{lastHash, db}
+
+	return &chain
+}
+
 func InitBlockChain(firstAddress string) *BlockChain {
+	if DBexists() {
+		fmt.Println("Blockchain already exists")
+		runtime.Goexit()
+	}
+
 	db, err := badger.Open(badger.DefaultOptions(dbPath))
 	utils.Handle(err)
 
@@ -33,23 +80,11 @@ func InitBlockChain(firstAddress string) *BlockChain {
 
 	// Insert block into Badge DB & Update LastHash
 	err = newBlockChain.Database.Update(func(txn *badger.Txn) error {
-		lastHash, err := txn.Get([]byte("lasthash"))
-
-		// if blockchain haven't ever exist
-		if err == badger.ErrKeyNotFound {
-			err := txn.Set(newBlock.Hash, newBlock.Serialize())
-			err = txn.Set([]byte("lasthash"), newBlock.Hash)
-
-			newBlockChain.LastHash = newBlock.Hash
-
-			return err
-		} else { // if it already existed
-			err := lastHash.Value(func(val []byte) error {
-				newBlockChain.LastHash = val
-				return nil
-			})
-			utils.Handle(err)
-		}
+		err = txn.Set(newBlock.Hash, newBlock.Serialize())
+		utils.Handle(err)
+		err = txn.Set([]byte("lasthash"), newBlock.Hash)
+		utils.Handle(err)
+		newBlockChain.LastHash = newBlock.Hash
 
 		return err
 	})
