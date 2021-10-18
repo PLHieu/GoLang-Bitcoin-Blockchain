@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"log"
 	"myblockchain/blockchain"
@@ -19,8 +18,9 @@ func main() {
 
 func (cli *CommandLine) printUsage() {
 	fmt.Println("Usage:")
-	fmt.Println(" createblockchain -address ADDRESS creates a blockchain and sends genesis reward to address")
-	fmt.Println(" printchain - Prints the blocks in the chain")
+	fmt.Println("1: Init Blockchain")
+	fmt.Println("2: Print Blockchain")
+	fmt.Println("0: Exit Program")
 }
 
 func (cli *CommandLine) validateArgs() {
@@ -55,38 +55,40 @@ func (cli *CommandLine) createBlockChain(address string) {
 }
 
 func (cli *CommandLine) run() {
-	cli.validateArgs()
+	userChoice := 1
 
-	createBlockchainCmd := flag.NewFlagSet("createblockchain", flag.ExitOnError)
-	printChainCmd := flag.NewFlagSet("printchain", flag.ExitOnError)
+	cli.printUsage()
 
-	createBlockchainAddress := createBlockchainCmd.String("address", "", "The address to send genesis block reward to")
-
-	switch os.Args[1] {
-	case "createblockchain":
-		err := createBlockchainCmd.Parse(os.Args[2:])
-		if err != nil {
-			log.Panic(err)
+	for userChoice != 0 {
+		fmt.Printf("--------------------------------------------------------------------------------\n")
+		fmt.Printf("Please enter your choice: ")
+		_, err := fmt.Scan(&userChoice)
+		if err != nil || userChoice > 2 || userChoice < 0 {
+			cli.handleErrors(err)
+			continue
 		}
-	case "printchain":
-		err := printChainCmd.Parse(os.Args[2:])
-		if err != nil {
-			log.Panic(err)
+
+		switch userChoice {
+		case 1:
+			fmt.Printf("-------------Create blockchain and sends genesis reward to address-------------\n")
+			var address string
+			fmt.Printf("Please enter first address in blockchain: ")
+			_, err := fmt.Scan(&address)
+			if err != nil {
+				cli.handleErrors(err)
+				continue
+			}
+			cli.createBlockChain(address)
+		case 2:
+			fmt.Printf("-------------------------------------Print Chain--------------------------------\n")
+			cli.printChain()
 		}
-	default:
-		cli.printUsage()
-		runtime.Goexit()
 	}
+}
 
-	if createBlockchainCmd.Parsed() {
-		if *createBlockchainAddress == "" {
-			createBlockchainCmd.Usage()
-			runtime.Goexit()
-		}
-		cli.createBlockChain(*createBlockchainAddress)
-	}
-
-	if printChainCmd.Parsed() {
-		cli.printChain()
+func (cli *CommandLine) handleErrors(err error) {
+	fmt.Printf("Sorry, there some errors happen. Please make sure that input's type is correct or you don't forget anything\n")
+	if err != nil {
+		log.Print(err)
 	}
 }
