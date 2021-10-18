@@ -33,6 +33,7 @@ func (b *Block) HashTransactions() []byte {
 }
 
 func CreateBlock(txs []*Transaction, prevHash []byte) *Block {
+	// todo validate transaction before adding into block
 	block := &Block{Hash: []byte{}, Transactions: txs, PrevHash: prevHash, Nonce: 0}
 	pow := CreatePow(block)
 	nonce, hash := pow.Run()

@@ -130,18 +130,20 @@ func (chain *BlockChain) Iterator() *BlockChainIterator {
 func (iter *BlockChainIterator) Next() *Block {
 	var block *Block
 
+	if iter.CurrentHash == nil {
+		return nil
+	}
+
 	// get Value from hash key
 	err := iter.Database.View(func(txn *badger.Txn) error {
 		item, err := txn.Get(iter.CurrentHash)
-		if err != nil {
-			block = nil
-		} else {
-			err = item.Value(func(encodedBlock []byte) error {
-				block = Deserialize(encodedBlock)
-				return nil
-			})
-			utils.Handle(err)
-		}
+		utils.Handle(err)
+
+		err = item.Value(func(encodedBlock []byte) error {
+			block = Deserialize(encodedBlock)
+			return nil
+		})
+		utils.Handle(err)
 
 		return err
 	})
@@ -200,7 +202,8 @@ func (chain *BlockChain) FindUnspentTxOutputs(address string) []Transaction {
 					// Todo: something with signature
 					if input.Sig == address {
 						// Add spent output into spentTXOs
-						spentTXOs[strTxId] = append(spentTXOs[strTxId], input.OutIndex)
+						inTxID := hex.EncodeToString(input.OutTxId)
+						spentTXOs[inTxID] = append(spentTXOs[inTxID], input.OutIndex)
 					}
 				}
 			}
